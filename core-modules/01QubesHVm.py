@@ -245,6 +245,14 @@ class QubesHVm(QubesResizableVm):
         params.update(self.storage.get_config_params())
         params['volatiledev'] = ''
 
+        if self.linux_stubdom and not self.guiagent_installed:
+            params['xen_features'] += '<qubes_gui state=\'on\'/>'
+
+        if self.linux_stubdom:
+            params['video_model'] = 'cirrus'
+        else:
+            params['video_model'] = 'vga'
+
         if self.timezone.lower() == 'localtime':
             params['time_basis'] = 'localtime'
             params['timeoffset'] = '0'
@@ -330,8 +338,16 @@ class QubesHVm(QubesResizableVm):
             raise QubesException("Cannot start the HVM while its template is running")
         try:
             if 'mem_required' not in kwargs:
-                # Reserve 44MB for stubdomain
-                kwargs['mem_required'] = (self.memory + 44) * 1024 * 1024
+                if self.linux_stubdom:
+                    if self.stubdom_mem:
+                        stubdom_mem = self.stubdom_mem
+                    else:
+                        stubdom_mem = 128 # default from libxl
+                else:
+                    stubdom_mem = 28 # hardcoded in libxl
+                stubdom_mem += 16 # video ram
+
+                kwargs['mem_required'] = (self.memory + stubdom_mem) * 1024 * 1024
             return super(QubesHVm, self).start(*args, **kwargs)
         except QubesException as e:
             capabilities = vmm.libvirt_conn.getCapabilities()

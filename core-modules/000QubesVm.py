@@ -137,6 +137,8 @@ class QubesVm(object):
                     eval("[" + value + "]") },
             "pci_strictreset": {"default": True},
             "pci_e820_host": {"default": True},
+            "linux_stubdom": {"default": False},
+            "stubdom_mem": {"default": None},
             # Internal VM (not shown in qubes-manager, doesn't create appmenus entries
             "internal": { "default": False, 'attr': '_internal' },
             "vcpus": { "default": 2 },
@@ -203,7 +205,7 @@ class QubesVm(object):
             'uses_default_netvm', 'include_in_backups', 'debug',\
             'qrexec_timeout', 'autostart', 'uses_default_dispvm_netvm',
             'backup_content', 'backup_size', 'backup_path', 'pool_name',\
-            'pci_e820_host']:
+            'pci_e820_host', 'linux_stubdom', 'stubdom_mem']:
             attrs[prop]['save'] = lambda prop=prop: str(getattr(self, prop))
         # Simple paths
         for prop in ['conf_file', 'firewall_conf']:
@@ -1193,8 +1195,8 @@ class QubesVm(object):
             # If dynamic memory management disabled, set maxmem=mem
             args['maxmem'] = args['mem']
         args['vcpus'] = str(self.vcpus)
-        args['features'] = ''
-        if self.netvm is not None:
+        args['xen_features'] = ''
+        if self.netvm is not None and not self.linux_stubdom:
             args['ip'] = self.ip
             args['mac'] = self.mac
             args['gateway'] = self.netvm.gateway
@@ -1219,7 +1221,17 @@ class QubesVm(object):
             args['no_network_begin'] = ''
             args['no_network_end'] = ''
         if len(self.pcidevs) and self.pci_e820_host:
-            args['features'] = '<xen><e820_host state=\'on\'/></xen>'
+            args['xen_features'] += '<e820_host state=\'on\'/>'
+
+        if self.linux_stubdom:
+            args['emulator_type'] = 'stubdom-linux'
+        else:
+            args['emulator_type'] = 'stubdom'
+
+        args['emulator_mem'] = ''
+        if self.linux_stubdom and self.stubdom_mem:
+            args['emulator_mem'] = ' memory="{}"'.format(self.stubdom_mem * 1024)
+
         args.update(self.storage.get_config_params())
         if hasattr(self, 'kernelopts'):
             args['kernelopts'] = self.kernelopts

@@ -59,6 +59,13 @@ def do_list(vm):
     print fmt.format ("pcidevs", vm.pcidevs)
     print fmt.format ("pci_strictreset", vm.pci_strictreset)
     print fmt.format ("pci_e820_host", vm.pci_e820_host)
+    print fmt.format ("linux_stubdom", vm.linux_stubdom)
+
+    if vm.stubdom_mem is None:
+        print fmt.format ("stubdom_mem", "None (use Xen default)")
+    else:
+        print fmt.format ("stubdom_mem", vm.linux_stubdom)
+
     if vm.template is None:
         print fmt.format ("root_img", vm.root_img)
     if hasattr(vm, "rootcow_img") and vm.rootcow_img is not None:
@@ -235,6 +242,31 @@ def set_pci_e820_host(vms, vm, args):
         return False
 
     vm.pci_e820_host = bool(eval(args[0].capitalize()))
+    return True
+
+def set_linux_stubdom(vms, vm, args):
+    if len (args) != 1:
+        print >> sys.stderr, "Missing value (True/False)!"
+        return False
+
+    vm.linux_stubdom = bool(eval(args[0].capitalize()))
+    return True
+
+def set_stubdom_mem(vms, vm, args):
+    if len (args) != 1:
+        print >> sys.stderr, "Missing value " \
+                "('None' for default or size in MiB)!"
+        return False
+
+    if args[0] == 'None':
+        vm.stubdom_mem = None
+    else:
+        new = int(args[0])
+        if new <= 0:
+            print >>sys.stderr, "Memory size must be positive"
+            return False
+        vm.stubdom_mem = new
+
     return True
 
 def set_netvm(vms, vm, args):
@@ -495,6 +527,8 @@ properties = {
     "pcidevs": set_pcidevs,
     "pci_strictreset": set_pci_strictreset,
     "pci_e820_host": set_pci_e820_host,
+    "linux_stubdom": set_linux_stubdom,
+    "stubdom_mem": set_stubdom_mem,
     "label" : set_label,
     "netvm" : set_netvm,
     "dispvm_netvm" : set_dispvm_netvm,

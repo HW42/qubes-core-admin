@@ -15,15 +15,17 @@
     <acpi/>
     <apic/>
     <viridian/>
-    {features}
+    <xen>
+      {xen_features}
+    </xen>
   </features>
   <clock offset='variable' adjustment='{timeoffset}' basis='{time_basis}'/>
   <on_poweroff>destroy</on_poweroff>
   <on_reboot>destroy</on_reboot>
   <on_crash>destroy</on_crash>
   <devices>
-    {no_network_begin}<emulator type='stubdom'/>{no_network_end}
-    {network_begin}<emulator type='stubdom' cmdline='-net lwip,client_ip={ip},server_ip={dns2},dns={dns1},gw={gateway},netmask={netmask}'/>{network_end}
+    {no_network_begin}<emulator type='{emulator_type}'{emulator_mem}/>{no_network_end}
+    {network_begin}<emulator type='{emulator_type}' cmdline='-net lwip,client_ip={ip},server_ip={dns2},dns={dns1},gw={gateway},netmask={netmask}'/>{network_end}
 {rootdev}
 {privatedev}
 {otherdevs}
@@ -31,7 +33,7 @@
 {pcidevs}
     <input type='tablet' bus='usb'/>
     <video type='vga'>
-      <model type='xen' vram='16384'/>
+      <model type='{video_model}' vram='16384'/>
     </video>
   </devices>
 </domain>

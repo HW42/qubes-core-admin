@@ -10,7 +10,11 @@
     <initrd>{kerneldir}/initramfs</initrd>
     <cmdline>root=/dev/mapper/dmroot ro nomodeset console=hvc0 rd_NO_PLYMOUTH rd.plymouth.enable=0 plymouth.enable=0 {kernelopts}</cmdline>
   </os>
-  <features>{features}</features>
+  <features>
+    <xen>
+      {xen_features}
+    </xen>
+  </features>
   <clock offset='utc' adjustment='reset'>
     <timer name="tsc" mode="native"/>
   </clock>
