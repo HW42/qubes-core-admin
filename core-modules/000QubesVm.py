@@ -1196,7 +1196,11 @@ class QubesVm(object):
             args['maxmem'] = args['mem']
         args['vcpus'] = str(self.vcpus)
         args['xen_features'] = ''
-        if self.netvm is not None and not self.linux_stubdom:
+        args['network_begin'] = '<!--'
+        args['network_end'] = '-->'
+        args['no_network_begin'] = ''
+        args['no_network_end'] = ''
+        if self.netvm is not None:
             args['ip'] = self.ip
             args['mac'] = self.mac
             args['gateway'] = self.netvm.gateway
@@ -1204,10 +1208,11 @@ class QubesVm(object):
             args['dns2'] = self.secondary_dns
             args['netmask'] = self.netmask
             args['netdev'] = self._format_net_dev(self.ip, self.mac, self.netvm.name)
-            args['network_begin'] = ''
-            args['network_end'] = ''
-            args['no_network_begin'] = '<!--'
-            args['no_network_end'] = '-->'
+            if not self.linux_stubdom:
+                args['network_begin'] = ''
+                args['network_end'] = ''
+                args['no_network_begin'] = '<!--'
+                args['no_network_end'] = '-->'
         else:
             args['ip'] = ''
             args['mac'] = ''
@@ -1216,10 +1221,6 @@ class QubesVm(object):
             args['dns2'] = ''
             args['netmask'] = ''
             args['netdev'] = ''
-            args['network_begin'] = '<!--'
-            args['network_end'] = '-->'
-            args['no_network_begin'] = ''
-            args['no_network_end'] = ''
         if len(self.pcidevs) and self.pci_e820_host:
             args['xen_features'] += '<e820_host state=\'on\'/>'
 
