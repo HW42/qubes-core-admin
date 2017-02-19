@@ -35,6 +35,7 @@
     <video type='vga'>
       <model type='{video_model}' vram='16384'/>
     </video>
+    {graphicsdev}
   </devices>
 </domain>
 

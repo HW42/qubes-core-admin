@@ -246,7 +246,9 @@ class QubesHVm(QubesResizableVm):
         params['volatiledev'] = ''
 
         if self.linux_stubdom and not self.guiagent_installed:
-            params['xen_features'] += '<qubes_gui state=\'on\'/>'
+            params['graphicsdev'] = '<graphics type="qubes"/>'
+        else:
+            params['graphicsdev'] = ''
 
         if self.linux_stubdom:
             params['video_model'] = 'cirrus'
