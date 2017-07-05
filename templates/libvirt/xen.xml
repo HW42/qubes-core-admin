@@ -153,11 +153,7 @@
                     {% endif %}
                     />
                 <input type="tablet" bus="usb"/>
-                {% if vm.features.check_with_template('linux-stubdom', True) %}
-                    <video type="cirrus"/>
-                {% else %}
-                    <video type="vga"/>
-                {% endif %}
+                <video type="vga"/>
                 {% if vm.features.check_with_template('linux-stubdom', True) %}
                     {# TODO only add qubes gui if gui-agent is not installed in HVM #}
                     <graphics type="qubes"/>
