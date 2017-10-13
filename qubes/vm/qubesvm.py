@@ -24,6 +24,7 @@
 from __future__ import absolute_import
 
 import asyncio
+import contextlib
 import base64
 import datetime
 import errno
@@ -801,6 +802,22 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.BaseVM):
             if self.get_power_state() != 'Halted':
                 return
 
+            # Stop receiving new libvirt events for this domain.
+            if hasattr(self, '_domain_event_callback_id'):
+                self.app.vmm.libvirt_conn.domainEventDeregisterAny(
+                    self._domain_event_callback_id)
+                del self._domain_event_callback_id
+
+            if hasattr(self, '_domain_shutdown_future'):
+                # Libvirt stopped event was already received. Finish Qubes
+                # event generation.
+                yield from self._domain_shutdown_future
+                del self._domain_shutdown_future
+            else:
+                # No libvirt stopped event received. Generate Qubes event now.
+                yield from self.fire_event_async('domain-stop')
+                yield from self.fire_event_async('domain-shutdown')
+
             self.log.info('Starting {}'.format(self.name))
 
             yield from self.fire_event_async('domain-pre-start',
@@ -832,6 +849,13 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.BaseVM):
 
                 self.libvirt_domain.createWithFlags(
                     libvirt.VIR_DOMAIN_START_PAUSED)
+
+                self._domain_event_callback_id = (
+                    self.app.vmm.libvirt_conn.domainEventRegisterAny(
+                        self.libvirt_domain,
+                        libvirt.VIR_DOMAIN_EVENT_ID_LIFECYCLE,
+                        self._domain_event_callback,
+                        None))
 
             except Exception as exc:
                 # let anyone receiving domain-pre-start know that startup failed
@@ -874,24 +898,41 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.BaseVM):
 
         return self
 
-    @asyncio.coroutine
-    def on_domain_shutdown_coro(self):
-        '''Coroutine for executing cleanup after domain shutdown.
-        Do not allow domain to be started again until this finishes.
+    def _domain_event_callback(self, _conn, domain, event, _detail, _opaque):
+        '''Generic libvirt event handler (virConnectDomainEventCallback),
+        translate libvirt event into qubes.events.
         '''
-        with (yield from self.startup_lock):
-            try:
-                yield from self.storage.stop()
-            except qubes.storage.StoragePoolException:
-                self.log.exception('Failed to stop storage for domain %s',
-                    self.name)
+        if not self.events_enabled:
+            return
 
-    @qubes.events.handler('domain-shutdown')
+        if event == libvirt.VIR_DOMAIN_EVENT_STOPPED:
+            self._domain_shutdown_future = \
+                asyncio.ensure_future(self._domain_shutdown_coro())
+            self.app.vmm.libvirt_conn.domainEventDeregisterAny(
+                self._domain_event_callback_id)
+            del self._domain_event_callback_id
+
+    @asyncio.coroutine
+    def _domain_shutdown_coro(self):
+        context_manager = self.startup_lock
+        if hasattr(self, '_domain_event_callback_id'):
+            # We are not called by self.start(), so we need to lock.
+            with (yield from self.startup_lock):
+                yield from self.fire_event_async('domain-stopped')
+                yield from self.fire_event_async('domain-shutdown')
+        else:
+            yield from self.fire_event_async('domain-stopped')
+            yield from self.fire_event_async('domain-shutdown')
+
+    @qubes.events.handler('domain-stopped')
+    @asyncio.coroutine
     def on_domain_shutdown(self, _event, **_kwargs):
-        '''Cleanup after domain shutdown'''
-        # TODO: ensure that domain haven't been started _before_ this
-        # coroutine got a chance to acquire a lock
-        asyncio.ensure_future(self.on_domain_shutdown_coro())
+        '''Cleanup after domain was stopped'''
+        try:
+            yield from self.storage.stop()
+        except qubes.storage.StoragePoolException:
+            self.log.exception('Failed to stop storage for domain %s',
+                self.name)
 
     @asyncio.coroutine
     def shutdown(self, force=False, wait=False):

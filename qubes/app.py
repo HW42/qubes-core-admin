@@ -1158,34 +1158,6 @@ class Qubes(qubes.PropertyHolder):
             raise qubes.exc.QubesException('No driver %s for pool %s' %
                                            (driver, name))
 
-    def register_event_handlers(self):
-        '''Register libvirt event handlers, which will translate libvirt
-        events into qubes.events. This function should be called only in
-        'qubesd' process and only when mainloop has been already set.
-        '''
-        self._domain_event_callback_id = (
-            self.vmm.libvirt_conn.domainEventRegisterAny(
-                None,  # any domain
-                libvirt.VIR_DOMAIN_EVENT_ID_LIFECYCLE,
-                self._domain_event_callback,
-                None))
-
-    def _domain_event_callback(self, _conn, domain, event, _detail, _opaque):
-        '''Generic libvirt event handler (virConnectDomainEventCallback),
-        translate libvirt event into qubes.events.
-        '''
-        if not self.events_enabled:
-            return
-
-        try:
-            vm = self.domains[domain.name()]
-        except KeyError:
-            # ignore events for unknown domains
-            return
-
-        if event == libvirt.VIR_DOMAIN_EVENT_STOPPED:
-            vm.fire_event('domain-shutdown')
-
     @qubes.events.handler('domain-pre-delete')
     def on_domain_pre_deleted(self, event, vm):
         # pylint: disable=unused-argument
