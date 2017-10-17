@@ -155,9 +155,24 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.BaseVM):
 
             *other arguments are as in :py:meth:`start`*
 
+        .. event:: domain-stopped (subject, event)
+
+            Fired when domain has been stopped.
+
+            This event is emitted before ``'domain-shutdown'`` and will trigger
+            the cleanup in QubesVM. So if you require that the cleanup has
+            already run use ``'domain-shutdown'``.
+
+            Handler for this event can be asynchronous (a coroutine).
+
+            :param subject: Event emitter (the qube object)
+            :param event: Event name (``'domain-shutdown'``)
+
         .. event:: domain-shutdown (subject, event)
 
             Fired when domain has been shut down.
+
+            Handler for this event can be asynchronous (a coroutine).
 
             :param subject: Event emitter (the qube object)
             :param event: Event name (``'domain-shutdown'``)
@@ -647,6 +662,15 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.BaseVM):
         self._libvirt_domain = None
         self._qdb_connection = None
 
+        # We assume a fully halted VM here. The 'domain-init' handler will
+        # check if the VM is already running.
+        self._domain_stopped_event_received = True
+        self._domain_stopped_event_handled = True
+
+        # Internal lock to ensure ordering between _domain_stopped_coro() and
+        # start(). This should not be accessed anywhere else.
+        self._domain_stopped_lock = asyncio.Lock()
+
         if xml is None:
             # we are creating new VM and attributes came through kwargs
             assert hasattr(self, 'qid')
@@ -716,6 +740,8 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.BaseVM):
 
         if not self.app.vmm.offline_mode and self.is_running():
             self.start_qdb_watch()
+            self._domain_stopped_event_received = False
+            self._domain_stopped_event_handled = False
 
     @qubes.events.handler('property-set:label')
     def on_property_set_label(self, event, name, newvalue, oldvalue=None):
@@ -801,6 +827,30 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.BaseVM):
             if self.get_power_state() != 'Halted':
                 return
 
+            with (yield from self._domain_stopped_lock):
+                # Don't accept any new stopped event's till a new VM has been
+                # created. If we didn't received any stopped event or it wasn't
+                # handled yet we will handle this in the next lines.
+                self._domain_stopped_event_received = True
+
+                if hasattr(self, '_domain_stopped_future'):
+                    # Libvirt stopped event was already received, so cancel the
+                    # future. If it didn't generate the Qubes events yet we
+                    # will do it below.
+                    self._domain_stopped_future.cancel()
+                    del self._domain_stopped_future
+
+                if not self._domain_stopped_event_handled:
+                    # No Qubes domain-stopped events have been generated yet.
+                    # So do this now.
+
+                    # Set this immediately such that we don't generate events twice if
+                    # an exception gets thrown.
+                    self._domain_stopped_event_handled = True
+
+                    yield from self.fire_event_async('domain-stopped')
+                    yield from self.fire_event_async('domain-shutdown')
+
             self.log.info('Starting {}'.format(self.name))
 
             yield from self.fire_event_async('domain-pre-start',
@@ -832,6 +882,9 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.BaseVM):
 
                 self.libvirt_domain.createWithFlags(
                     libvirt.VIR_DOMAIN_START_PAUSED)
+
+                self._domain_stopped_event_received = False
+                self._domain_stopped_event_handled = False
 
             except Exception as exc:
                 # let anyone receiving domain-pre-start know that startup failed
@@ -874,24 +927,51 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.BaseVM):
 
         return self
 
-    @asyncio.coroutine
-    def on_domain_shutdown_coro(self):
-        '''Coroutine for executing cleanup after domain shutdown.
-        Do not allow domain to be started again until this finishes.
-        '''
-        with (yield from self.startup_lock):
-            try:
-                yield from self.storage.stop()
-            except qubes.storage.StoragePoolException:
-                self.log.exception('Failed to stop storage for domain %s',
-                    self.name)
+    def on_libvirt_domain_stopped(self):
+        ''' Handle VIR_DOMAIN_EVENT_STOPPED events from libvirt.
 
-    @qubes.events.handler('domain-shutdown')
+        This is not a Qubes event hanlder. Instead this function does some
+        sanitiy checks and synchronization with self.start() and then emits
+        Qubes events.
+        '''
+
+        state = self.get_power_state()
+        if state not in ['Halted', 'Crashed', 'Dying']:
+            self.log.warning('Stopped event from libvirt received,'
+                ' but domain is in state {}!'.format(state))
+            # ignore this unexpected event
+            return
+
+        if self._domain_stopped_event_received:
+            self.log.warning('Dupplicated stopped event from libvirt received!')
+            # ignore this unexpected event
+            return
+
+        self._domain_stopped_event_received = True
+        self._domain_stopped_future = \
+            asyncio.ensure_future(self._domain_stopped_coro())
+
+    @asyncio.coroutine
+    def _domain_stopped_coro(self):
+        with (yield from self._domain_stopped_lock):
+            assert not self._domain_stopped_event_handled
+
+            # Set this immediately such that we don't generate events twice if
+            # an exception gets thrown.
+            self._domain_stopped_event_handled = True
+
+            yield from self.fire_event_async('domain-stopped')
+            yield from self.fire_event_async('domain-shutdown')
+
+    @qubes.events.handler('domain-stopped')
+    @asyncio.coroutine
     def on_domain_shutdown(self, _event, **_kwargs):
-        '''Cleanup after domain shutdown'''
-        # TODO: ensure that domain haven't been started _before_ this
-        # coroutine got a chance to acquire a lock
-        asyncio.ensure_future(self.on_domain_shutdown_coro())
+        '''Cleanup after domain was stopped'''
+        try:
+            yield from self.storage.stop()
+        except qubes.storage.StoragePoolException:
+            self.log.exception('Failed to stop storage for domain %s',
+                self.name)
 
     @asyncio.coroutine
     def shutdown(self, force=False, wait=False):
